@@ -340,6 +340,7 @@ namespace OcTree.Scripts
                         Obj = obj,
                         Pos = objPos
                     };
+                    // 直接添加到当前节点
                     objects.Add(newObj);
                     return;
                 }
@@ -347,20 +348,21 @@ namespace OcTree.Scripts
                 int bestFitChild;
                 if (children == null)
                 {
+                    // 触发分割
                     Split();
                     if (children == null)
                     {
                         Debug.LogError("Child creation failed for an unknown reason. Early exit.");
                         return;
                     }
-
-
+                    
+                    // 重新分配现有对象到子节点
                     for (int i = objects.Count - 1; i >= 0; i--)
                     {
                         OctreeObject existingObj = objects[i];
                         bestFitChild = BestFitChild(existingObj.Pos);
-                        children[bestFitChild].SubAdd(existingObj.Obj, existingObj.Pos); // Go a level deeper					
-                        objects.Remove(existingObj); // Remove from here
+                        children[bestFitChild].SubAdd(existingObj.Obj, existingObj.Pos); 			
+                        objects.Remove(existingObj); 
                     }
                 }
             }
