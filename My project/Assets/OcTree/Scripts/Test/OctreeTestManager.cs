@@ -19,10 +19,17 @@ namespace OcTree.Scripts.Test
         [SerializeField] private Vector3 queryPosition = Vector3.zero;
         [SerializeField] private float queryRadius = 10f;
         [SerializeField] private bool showQueryResults = true;
+        
+        [Header("射线查询测试")]
+        [SerializeField] private Vector3 rayOrigin = Vector3.zero;
+        [SerializeField] private Vector3 rayDirection = Vector3.right;
+        [SerializeField] private float rayMaxDistance = 15f;
+        [SerializeField] private bool showRayQuery = false;
     
         private PointOctree<TestObject> octree;
         private List<TestObject> testObjects = new List<TestObject>();
         private List<TestObject> queryResults = new List<TestObject>();
+        private List<TestObject> rayQueryResults = new List<TestObject>();
     
         /// <summary>
         /// 测试用对象类
@@ -192,7 +199,7 @@ namespace OcTree.Scripts.Test
                 queryOctree.Add(obj, positions[i]);
             }
         
-            // 执行范围查询
+            // 测试基于位置的范围查询
             Vector3 queryCenter = Vector3.zero;
             float queryDist = 10f;
         
@@ -200,7 +207,7 @@ namespace OcTree.Scripts.Test
             List<TestObject> results = new List<TestObject>();
             bool found = queryOctree.GetNearbyNonAlloc(queryCenter, queryDist, results);
         
-            Debug.Log($"在位置 {queryCenter} 半径 {queryDist} 内找到 {results.Count} 个对象:");
+            Debug.Log($"位置查询 - 在位置 {queryCenter} 半径 {queryDist} 内找到 {results.Count} 个对象:");
             foreach (var result in results)
             {
                 float distance = Vector3.Distance(queryCenter, result.position);
@@ -209,7 +216,68 @@ namespace OcTree.Scripts.Test
         
             // 使用分配版本对比
             var arrayResults = queryOctree.GetNearby(queryCenter, queryDist);
-            Debug.Log($"数组版本返回 {arrayResults.Length} 个对象");
+            Debug.Log($"位置查询 - 数组版本返回 {arrayResults.Length} 个对象");
+            
+            // 测试基于射线的范围查询
+            TestRayQueries(queryOctree, queryDist);
+        }
+        
+        /// <summary>
+        /// 测试基于射线的查询
+        /// </summary>
+        void TestRayQueries(PointOctree<TestObject> queryOctree, float maxDistance)
+        {
+            Debug.Log("--- 测试射线查询 ---");
+            
+            // 测试不同方向的射线
+            Ray[] testRays = {
+                new Ray(Vector3.zero, Vector3.right),           // 沿X轴正方向
+                new Ray(Vector3.zero, Vector3.up),              // 沿Y轴正方向
+                new Ray(Vector3.zero, Vector3.forward),         // 沿Z轴正方向
+                new Ray(Vector3.zero, Vector3.one.normalized),  // 对角线方向
+                new Ray(new Vector3(-10, 0, 0), Vector3.right), // 从外部射入
+                new Ray(new Vector3(0, 10, 0), Vector3.down)    // 从上往下
+            };
+            
+            string[] rayNames = {
+                "沿X轴正方向",
+                "沿Y轴正方向", 
+                "沿Z轴正方向",
+                "对角线方向",
+                "从外部射入",
+                "从上往下"
+            };
+            
+            for (int i = 0; i < testRays.Length; i++)
+            {
+                Ray ray = testRays[i];
+                
+                // 使用非分配版本测试
+                List<TestObject> rayResults = new List<TestObject>();
+                bool foundRay = queryOctree.GetNearbyNonAlloc(ray, maxDistance, rayResults);
+                
+                Debug.Log($"射线查询 ({rayNames[i]}) - 起点: {ray.origin}, 方向: {ray.direction}");
+                Debug.Log($"  在距离 {maxDistance} 内找到 {rayResults.Count} 个对象:");
+                
+                foreach (var result in rayResults)
+                {
+                    float distanceToRay = Mathf.Sqrt(PointOctreeNode<TestObject>.SqrDistanceToRay(ray, result.position));
+                    Vector3 closestPoint = ray.origin + Vector3.Project(result.position - ray.origin, ray.direction);
+                    float distanceAlongRay = Vector3.Distance(ray.origin, closestPoint);
+                    
+                    Debug.Log($"    - {result.name} 到射线距离: {distanceToRay:F2}, 沿射线距离: {distanceAlongRay:F2}");
+                }
+                
+                // 使用分配版本对比
+                var rayArrayResults = queryOctree.GetNearby(ray, maxDistance);
+                Debug.Log($"  数组版本返回 {rayArrayResults.Length} 个对象");
+                
+                // 验证两种方法返回相同结果
+                if (rayResults.Count != rayArrayResults.Length)
+                {
+                    Debug.LogWarning($"射线查询结果不一致! NonAlloc: {rayResults.Count}, Array: {rayArrayResults.Length}");
+                }
+            }
         }
     
         /// <summary>
@@ -316,7 +384,7 @@ namespace OcTree.Scripts.Test
             float addTime = sw.ElapsedMilliseconds;
             Debug.Log($"添加 {testObjectCount} 个对象耗时: {addTime}ms (平均 {addTime/testObjectCount:F3}ms/对象)");
         
-            // 查询性能测试
+            // 位置查询性能测试
             sw.Restart();
             int queryCount = 20;
             int totalFound = 0;
@@ -335,8 +403,33 @@ namespace OcTree.Scripts.Test
         
             sw.Stop();
             float queryTime = sw.ElapsedMilliseconds;
-            Debug.Log($"{queryCount} 次范围查询耗时: {queryTime}ms (平均 {queryTime/queryCount:F3}ms/查询)");
-            Debug.Log($"平均每次查询找到 {totalFound/(float)queryCount:F1} 个对象");
+            Debug.Log($"{queryCount} 次位置查询耗时: {queryTime}ms (平均 {queryTime/queryCount:F3}ms/查询)");
+            Debug.Log($"平均每次位置查询找到 {totalFound/(float)queryCount:F1} 个对象");
+            
+            // 射线查询性能测试
+            sw.Restart();
+            int rayQueryCount = 20;
+            int totalRayFound = 0;
+            
+            for (int i = 0; i < rayQueryCount; i++)
+            {
+                Vector3 rayOriginPos = new Vector3(
+                    Random.Range(-40f, 40f),
+                    Random.Range(-40f, 40f),
+                    Random.Range(-40f, 40f)
+                );
+                
+                Vector3 rayDir = Random.onUnitSphere;
+                Ray testRay = new Ray(rayOriginPos, rayDir);
+                
+                var rayResults = perfOctree.GetNearby(testRay, rayMaxDistance);
+                totalRayFound += rayResults.Length;
+            }
+            
+            sw.Stop();
+            float rayQueryTime = sw.ElapsedMilliseconds;
+            Debug.Log($"{rayQueryCount} 次射线查询耗时: {rayQueryTime}ms (平均 {rayQueryTime/rayQueryCount:F3}ms/查询)");
+            Debug.Log($"平均每次射线查询找到 {totalRayFound/(float)rayQueryCount:F1} 个对象");
         
             // 删除性能测试
             sw.Restart();
@@ -374,6 +467,35 @@ namespace OcTree.Scripts.Test
                 Debug.Log($"  - {result.name} 距离: {distance:F2}");
             }
         }
+        
+        /// <summary>
+        /// 手动触发射线查询测试
+        /// </summary>
+        [ContextMenu("执行射线查询")]
+        public void PerformRayQuery()
+        {
+            if (octree == null)
+            {
+                Debug.LogWarning("八叉树未初始化");
+                return;
+            }
+            
+            Ray testRay = new Ray(rayOrigin, rayDirection.normalized);
+            rayQueryResults.Clear();
+            bool found = octree.GetNearbyNonAlloc(testRay, rayMaxDistance, rayQueryResults);
+            
+            Debug.Log($"射线查询 - 起点: {testRay.origin}, 方向: {testRay.direction}, 最大距离: {rayMaxDistance}");
+            Debug.Log($"找到 {rayQueryResults.Count} 个对象:");
+            
+            foreach (var result in rayQueryResults)
+            {
+                float distanceToRay = Mathf.Sqrt(PointOctreeNode<TestObject>.SqrDistanceToRay(testRay, result.position));
+                Vector3 closestPoint = testRay.origin + Vector3.Project(result.position - testRay.origin, testRay.direction);
+                float distanceAlongRay = Vector3.Distance(testRay.origin, closestPoint);
+                
+                Debug.Log($"  - {result.name} 到射线距离: {distanceToRay:F2}, 沿射线距离: {distanceAlongRay:F2}");
+            }
+        }
     
         /// <summary>
         /// 添加随机测试对象
@@ -409,6 +531,7 @@ namespace OcTree.Scripts.Test
             InitializeOctree();
             testObjects.Clear();
             queryResults.Clear();
+            rayQueryResults.Clear();
             Debug.Log("八叉树已清空");
         }
     
@@ -423,17 +546,44 @@ namespace OcTree.Scripts.Test
             // 绘制对象位置
             octree.DrawAllObjects();
         
-            // 绘制查询范围
+            // 绘制位置查询范围
             if (showQueryResults)
             {
                 Gizmos.color = Color.yellow;
                 Gizmos.DrawWireSphere(queryPosition, queryRadius);
             
-                // 高亮查询结果
+                // 高亮位置查询结果
                 Gizmos.color = Color.red;
                 foreach (var result in queryResults)
                 {
                     Gizmos.DrawSphere(result.position, 0.5f);
+                }
+            }
+            
+            // 绘制射线查询
+            if (showRayQuery)
+            {
+                Ray visualRay = new Ray(rayOrigin, rayDirection.normalized);
+                
+                // 绘制射线
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawRay(visualRay.origin, visualRay.direction * rayMaxDistance);
+                
+                // 绘制射线起点
+                Gizmos.color = Color.blue;
+                Gizmos.DrawSphere(visualRay.origin, 0.8f);
+                
+                // 高亮射线查询结果
+                Gizmos.color = Color.magenta;
+                foreach (var result in rayQueryResults)
+                {
+                    Gizmos.DrawSphere(result.position, 0.6f);
+                    
+                    // 绘制从对象到射线的最短距离线
+                    Vector3 closestPoint = visualRay.origin + Vector3.Project(result.position - visualRay.origin, visualRay.direction);
+                    Gizmos.color = Color.gray;
+                    Gizmos.DrawLine(result.position, closestPoint);
+                    Gizmos.color = Color.magenta;
                 }
             }
         
@@ -445,7 +595,7 @@ namespace OcTree.Scripts.Test
             if (!enableVisualization)
                 return;
         
-            GUILayout.BeginArea(new Rect(10, 10, 300, 400));
+            GUILayout.BeginArea(new Rect(10, 10, 350, 500));
             GUILayout.BeginVertical("box");
         
             GUILayout.Label("八叉树测试控制面板", EditorGUIStyles.BoldLabel);
@@ -453,7 +603,8 @@ namespace OcTree.Scripts.Test
             if (octree != null)
             {
                 GUILayout.Label($"对象总数: {octree.Count}");
-                GUILayout.Label($"查询结果: {queryResults.Count}");
+                GUILayout.Label($"位置查询结果: {queryResults.Count}");
+                GUILayout.Label($"射线查询结果: {rayQueryResults.Count}");
             }
         
             GUILayout.Space(10);
@@ -464,17 +615,34 @@ namespace OcTree.Scripts.Test
             if (GUILayout.Button("添加随机对象"))
                 AddRandomObjects();
         
-            if (GUILayout.Button("执行范围查询"))
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("执行位置查询"))
                 PerformRangeQuery();
+            
+            if (GUILayout.Button("执行射线查询"))
+                PerformRayQuery();
+            GUILayout.EndHorizontal();
         
             if (GUILayout.Button("清空八叉树"))
                 ClearOctree();
         
             GUILayout.Space(10);
         
-            GUILayout.Label("查询设置:");
+            GUILayout.Label("位置查询设置:");
             queryRadius = GUILayout.HorizontalSlider(queryRadius, 1f, 50f);
             GUILayout.Label($"查询半径: {queryRadius:F1}");
+            
+            GUILayout.Space(5);
+            
+            GUILayout.Label("射线查询设置:");
+            rayMaxDistance = GUILayout.HorizontalSlider(rayMaxDistance, 1f, 50f);
+            GUILayout.Label($"射线最大距离: {rayMaxDistance:F1}");
+            
+            GUILayout.Space(10);
+            
+            GUILayout.Label("可视化选项:");
+            showQueryResults = GUILayout.Toggle(showQueryResults, "显示位置查询");
+            showRayQuery = GUILayout.Toggle(showRayQuery, "显示射线查询");
         
             GUILayout.EndVertical();
             GUILayout.EndArea();

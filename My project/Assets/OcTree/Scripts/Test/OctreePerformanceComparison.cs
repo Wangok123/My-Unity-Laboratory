@@ -13,6 +13,7 @@ namespace OcTree.Scripts.Test
         [SerializeField] private int queryCount = 100;
         [SerializeField] private float worldSize = 200f;
         [SerializeField] private float queryRadius = 15f;
+        [SerializeField] private float rayMaxDistance = 20f;
         [SerializeField] private bool runOnStart = false;
     
         private struct TestData
@@ -60,17 +61,25 @@ namespace OcTree.Scripts.Test
             // 生成测试数据
             List<TestData> testData = GenerateTestData(objectCount);
         
-            // 八叉树测试
-            float octreeTime = TestOctreePerformance(testData);
-        
-            // 线性搜索测试
-            float linearTime = TestLinearSearchPerformance(testData);
+            // 位置查询性能测试
+            float octreePositionTime = TestOctreePositionPerformance(testData);
+            float linearPositionTime = TestLinearSearchPerformance(testData);
+            
+            // 射线查询性能测试
+            float octreeRayTime = TestOctreeRayPerformance(testData);
+            float linearRayTime = TestLinearRaySearchPerformance(testData);
         
             // 输出结果
-            float speedup = linearTime / octreeTime;
-            Debug.Log($"八叉树平均查询时间: {octreeTime:F4}ms");
-            Debug.Log($"线性搜索平均查询时间: {linearTime:F4}ms");
-            Debug.Log($"八叉树性能提升: {speedup:F2}x");
+            float positionSpeedup = linearPositionTime / octreePositionTime;
+            float raySpeedup = linearRayTime / octreeRayTime;
+            
+            Debug.Log($"位置查询 - 八叉树平均时间: {octreePositionTime:F4}ms");
+            Debug.Log($"位置查询 - 线性搜索平均时间: {linearPositionTime:F4}ms");
+            Debug.Log($"位置查询 - 八叉树性能提升: {positionSpeedup:F2}x");
+            
+            Debug.Log($"射线查询 - 八叉树平均时间: {octreeRayTime:F4}ms");
+            Debug.Log($"射线查询 - 线性搜索平均时间: {linearRayTime:F4}ms");
+            Debug.Log($"射线查询 - 八叉树性能提升: {raySpeedup:F2}x");
         
             // 内存使用估算
             float octreeMemory = EstimateOctreeMemory(objectCount);
@@ -102,9 +111,9 @@ namespace OcTree.Scripts.Test
         }
     
         /// <summary>
-        /// 测试八叉树性能
+        /// 测试八叉树位置查询性能
         /// </summary>
-        float TestOctreePerformance(List<TestData> testData)
+        float TestOctreePositionPerformance(List<TestData> testData)
         {
             // 构建八叉树
             var octree = new PointOctree<TestData>(worldSize, Vector3.zero, 1f);
@@ -120,7 +129,7 @@ namespace OcTree.Scripts.Test
             sw.Stop();
             float buildTime = sw.ElapsedMilliseconds;
         
-            // 执行查询测试
+            // 执行位置查询测试
             sw.Restart();
             List<TestData> results = new List<TestData>();
         
@@ -140,7 +149,47 @@ namespace OcTree.Scripts.Test
             float queryTime = sw.ElapsedMilliseconds;
         
             Debug.Log($"  八叉树构建时间: {buildTime}ms");
-            Debug.Log($"  八叉树 {queryCount} 次查询总时间: {queryTime}ms");
+            Debug.Log($"  八叉树 {queryCount} 次位置查询总时间: {queryTime}ms");
+        
+            return queryTime / (float)queryCount;
+        }
+        
+        /// <summary>
+        /// 测试八叉树射线查询性能
+        /// </summary>
+        float TestOctreeRayPerformance(List<TestData> testData)
+        {
+            // 构建八叉树（重用相同数据）
+            var octree = new PointOctree<TestData>(worldSize, Vector3.zero, 1f);
+        
+            foreach (var data in testData)
+            {
+                octree.Add(data, data.position);
+            }
+        
+            // 执行射线查询测试
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            List<TestData> results = new List<TestData>();
+        
+            for (int i = 0; i < queryCount; i++)
+            {
+                Vector3 rayOrigin = new Vector3(
+                    Random.Range(-worldSize/2, worldSize/2),
+                    Random.Range(-worldSize/2, worldSize/2),
+                    Random.Range(-worldSize/2, worldSize/2)
+                );
+                
+                Vector3 rayDirection = Random.onUnitSphere;
+                Ray testRay = new Ray(rayOrigin, rayDirection);
+                
+                octree.GetNearbyNonAlloc(testRay, rayMaxDistance, results);
+                results.Clear();
+            }
+        
+            sw.Stop();
+            float queryTime = sw.ElapsedMilliseconds;
+        
+            Debug.Log($"  八叉树 {queryCount} 次射线查询总时间: {queryTime}ms");
         
             return queryTime / (float)queryCount;
         }
@@ -176,7 +225,47 @@ namespace OcTree.Scripts.Test
             sw.Stop();
             float totalTime = sw.ElapsedMilliseconds;
         
-            Debug.Log($"  线性搜索 {queryCount} 次查询总时间: {totalTime}ms");
+            Debug.Log($"  线性搜索 {queryCount} 次位置查询总时间: {totalTime}ms");
+        
+            return totalTime / (float)queryCount;
+        }
+        
+        /// <summary>
+        /// 测试线性搜索射线查询性能
+        /// </summary>
+        float TestLinearRaySearchPerformance(List<TestData> testData)
+        {
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+        
+            for (int i = 0; i < queryCount; i++)
+            {
+                Vector3 rayOrigin = new Vector3(
+                    Random.Range(-worldSize/2, worldSize/2),
+                    Random.Range(-worldSize/2, worldSize/2),
+                    Random.Range(-worldSize/2, worldSize/2)
+                );
+                
+                Vector3 rayDirection = Random.onUnitSphere;
+                Ray testRay = new Ray(rayOrigin, rayDirection);
+                
+                // 线性搜索射线查询
+                List<TestData> results = new List<TestData>();
+                float sqrMaxDistance = rayMaxDistance * rayMaxDistance;
+            
+                foreach (var data in testData)
+                {
+                    float sqrDistanceToRay = PointOctreeNode<TestData>.SqrDistanceToRay(testRay, data.position);
+                    if (sqrDistanceToRay <= sqrMaxDistance)
+                    {
+                        results.Add(data);
+                    }
+                }
+            }
+        
+            sw.Stop();
+            float totalTime = sw.ElapsedMilliseconds;
+        
+            Debug.Log($"  线性搜索 {queryCount} 次射线查询总时间: {totalTime}ms");
         
             return totalTime / (float)queryCount;
         }
@@ -244,12 +333,19 @@ namespace OcTree.Scripts.Test
         
             Debug.Log($"生成了 {clusteredData.Count} 个聚集分布的对象");
         
-            // 测试性能
-            float octreeTime = TestOctreePerformance(clusteredData);
-            float linearTime = TestLinearSearchPerformance(clusteredData);
+            // 测试位置查询性能
+            float octreePositionTime = TestOctreePositionPerformance(clusteredData);
+            float linearPositionTime = TestLinearSearchPerformance(clusteredData);
+            
+            // 测试射线查询性能
+            float octreeRayTime = TestOctreeRayPerformance(clusteredData);
+            float linearRayTime = TestLinearRaySearchPerformance(clusteredData);
         
-            float speedup = linearTime / octreeTime;
-            Debug.Log($"聚集分布场景下八叉树性能提升: {speedup:F2}x");
+            float positionSpeedup = linearPositionTime / octreePositionTime;
+            float raySpeedup = linearRayTime / octreeRayTime;
+            
+            Debug.Log($"聚集分布场景下位置查询八叉树性能提升: {positionSpeedup:F2}x");
+            Debug.Log($"聚集分布场景下射线查询八叉树性能提升: {raySpeedup:F2}x");
         }
     
         /// <summary>
@@ -303,7 +399,7 @@ namespace OcTree.Scripts.Test
     
         void OnGUI()
         {
-            GUILayout.BeginArea(new Rect(10, Screen.height - 120, 400, 100));
+            GUILayout.BeginArea(new Rect(10, Screen.height - 150, 450, 130));
             GUILayout.BeginVertical("box");
         
             GUILayout.Label("八叉树性能测试", GUI.skin.button);
@@ -318,6 +414,8 @@ namespace OcTree.Scripts.Test
         
             if (GUILayout.Button("实时性能监控"))
                 StartRealtimeMonitoring();
+                
+            GUILayout.Label($"查询半径: {queryRadius}, 射线距离: {rayMaxDistance}");
         
             GUILayout.EndVertical();
             GUILayout.EndArea();

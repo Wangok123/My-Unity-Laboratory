@@ -130,21 +130,22 @@ namespace OcTree.Scripts
         }
 
         public void GetNearby(ref Ray ray, float maxDistance, List<T> result) {
+            // 1. 扩展边界框用于相交测试
             bounds.Expand(new Vector3(maxDistance * 2, maxDistance * 2, maxDistance * 2));
             bool intersected = bounds.IntersectRay(ray);
-            bounds.size = actualBoundsSize;
+            bounds.size = actualBoundsSize; // 恢复原始大小
             if (!intersected) {
                 return;
             }
 
-            // Check against any objects in this node
+            // 2. 检查当前节点中的所有对象
             for (int i = 0; i < objects.Count; i++) {
                 if (SqrDistanceToRay(ray, objects[i].Pos) <= (maxDistance * maxDistance)) {
                     result.Add(objects[i].Obj);
                 }
             }
 
-            // Check children
+            // 3. 递归检查子节点
             if (children != null) {
                 for (int i = 0; i < 8; i++) {
                     children[i].GetNearby(ref ray, maxDistance, result);
@@ -156,13 +157,11 @@ namespace OcTree.Scripts
         {
             float sqrMaxDistance = maxDistance * maxDistance;
             
-            // Does the node intersect with the sphere of center = position and radius = maxDistance?
             if ((bounds.ClosestPoint(position) - position).sqrMagnitude > sqrMaxDistance)
             {
                 return;
             }
-            
-            // Check against any objects in this node
+
             for (int i = 0; i < objects.Count; i++)
             {
                 if ((position - objects[i].Pos).sqrMagnitude <= sqrMaxDistance)
@@ -171,7 +170,6 @@ namespace OcTree.Scripts
                 }
             }
 
-            // Check children
             if (children != null)
             {
                 for (int i = 0; i < 8; i++)
